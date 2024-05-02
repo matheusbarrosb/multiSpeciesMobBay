@@ -87,17 +87,46 @@ makeInputData = function(rawData,
   fulldf    = as.data.frame(cbind(Ymat, tempmat, salmat,
                                   maxTempmat, daysAb33mat,
                                   consHWdsmat))
-  fulldf    = na.exclude(fulldf)
 
   splitFullDF = split.default(fulldf,
                               ceiling(seq_along(fulldf)/length(selectedStations)))
   
-  Y       = splitFullDF$`1`
-  Temp    = splitFullDF$`2`
-  Sal     = splitFullDF$`3`
-  maxTemp = splitFullDF$`4`
-  daysAb33= splitFullDF$`5`
-  consHWds= splitFullDF$`6`
+  Y       = as.matrix(splitFullDF$`1`)
+  for(j in 1:ncol(Y)) {
+    for (i in 1:nrow(Y)) {
+      Y[i,j] = ifelse(is.na(Y[i,j]), mean(Y[j]), Y[i,j])
+    }
+  }
+  Temp    = as.matrix(splitFullDF$`2`)
+  for(j in 1:ncol(Temp)) {
+    for (i in 1:nrow(Temp)) {
+      Temp[i,j] = ifelse(is.na(Temp[i,j]), mean(Temp[j]), Temp[i,j])
+    }
+  }
+  Sal     = as.matrix(splitFullDF$`3`)
+  for(j in 1:ncol(Sal)) {
+    for (i in 1:nrow(Sal)) {
+      Sal[i,j] = ifelse(is.na(Sal[i,j]), mean(Sal[j]), Sal[i,j])
+    }
+  }
+  maxTemp = as.matrix(splitFullDF$`4`)
+  for(j in 1:ncol(maxTemp)) {
+    for (i in 1:nrow(Temp)) {
+      maxTemp[i,j] = ifelse(is.na(maxTemp[i,j]), mean(maxTemp[j]), maxTemp[i,j])
+    }
+  }
+  daysAb33= as.matrix(splitFullDF$`5`)
+  for(j in 1:ncol(daysAb33)) {
+    for (i in 1:nrow(daysAb33)) {
+      daysAb33[i,j] = ifelse(is.na(daysAb33[i,j]), mean(daysAb33[j]), daysAb33[i,j])
+    }
+  }
+  consHWds= as.matrix(splitFullDF$`6`)
+  for(j in 1:ncol(consHWds)) {
+    for (i in 1:nrow(consHWds)) {
+      consHWds[i,j] = ifelse(is.na(consHWds[i,j]), mean(consHWds[j]), consHWds[i,j])
+    }
+  }
   
   output = list(
     Y    = t(Y),
