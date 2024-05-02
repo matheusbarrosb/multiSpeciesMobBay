@@ -115,6 +115,12 @@ We first use the '' function to obtain the input data in the format JAGS require
 
 ```{r}
 
+FAMPtrawl
+heatwaves$YEAR = heatwaves$Year
+
+FAMPtrawl2 = merge(x = heatwaves, y = FAMPtrawl, by = "YEAR", all.x = TRUE)
+FAMPtrawl
+
 # specify which stations to be analyzed for each species
 selectedStationsCALSAP = c(3,12,14,24,27,28,61)
 selectedStationsANCMIT = c(9,12,14,20,24,27,28,31,56,61)
