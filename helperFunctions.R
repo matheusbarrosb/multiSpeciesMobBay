@@ -1,12 +1,3 @@
-FAMPtrawl
-heatwaves$YEAR = heatwaves$Year
-
-FAMPtrawl2 = merge(x = heatwaves, y = FAMPtrawl, by = "YEAR", all.x = TRUE)
-FAMPtrawl
-
-dim(FAMPtrawl)
-dim(FAMPtrawl2)
-
 makeInputData = function(rawData,
                          species,
                          selectedStations,
@@ -123,10 +114,6 @@ makeInputData = function(rawData,
   return(output)  
 }
 
-a = makeInputData(rawData = FAMPtrawl2,
-              species = "CALLINECTES SAPIDUS",
-              selectedStations = selectedStationsCALSAP)
-
 #-------------------------------------------------------------------------------
 plotAndGetStates = function(fit, nStations, stationIDs,
                             obData, startYr, endYr,
@@ -193,29 +180,6 @@ plotAndGetStates = function(fit, nStations, stationIDs,
  return(estStates)
   
 }
-
-estEstates = plotAndGetStates(fit = fitCALSAP, nStations = 7,
-                              stationIDs = selectedStationsCALSAP,
-                              obData = a$Y, startYr = 1981, endYr = 2014,
-                              panelRows = 3, panelCols = 3, plot = TRUE)
-
-ggplot(data = estEstates,
-       aes(x = as.numeric(years),
-           y = mean)) +
-  geom_point(aes(x = as.numeric(years),
-                 y = observations),
-             fill = "grey",
-             color = "black",
-             pch = 20) +
-  geom_line() +
-  geom_ribbon(aes(ymin = upper,
-                  ymax = lower),
-              alpha = 0.3, 
-              fill = "skyblue3") +
-  xlab("Time point") +
-  ylab("log CPUE") +
-  facet_wrap(~station) +
-  theme_linedraw()
 
 # ------------------------------------------------------------------------------
 
