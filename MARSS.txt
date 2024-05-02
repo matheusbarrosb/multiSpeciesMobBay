@@ -1,0 +1,50 @@
+
+model {
+
+# MULTIVARIATE AUTOREGRESSIVE STATE-SPACE MODEL FOR MODELLING RECRUITMENT TIME SERIES
+# AUTHOR: MATHEUS DE BARROS
+# DATE: 29/04/2024 (dd/mm/yyyy)
+
+# S = NUMBER OF STATIONS
+# T = LENGTH OF TIME SERIES
+# K = NUMBER OF COVARIATES
+
+# PRIOR DISTRIBUTIONS ----------------------------------------------------------
+gammaTemp     ~ dnorm(0, 0.01)    # EFFECT OF TEMPERATURE
+gammaSal      ~ dnorm(0, 0.01)    # EFFECT OF SALINITY
+gammaMaxTemp  ~ dnorm(0, 0.01)    # EFFECT OF MAXIMUM TEMPERATURE
+gammaDaysAb33 ~ dnorm(0, 0.01)    # EFFECT OF DAYS ABOVE 33.6 CELSIUS
+gammaConsHWds ~ dnorm(0, 0.01)    # EFFECT OF CONSECUTIVE HEATWAVE DAYS
+for (s in 1:S) {
+  phi[s]  ~ dnorm(0, 0.01)        # AUTOREGRESSIVE COEFFICIENT
+  phi0[s] ~ dnorm(0, 0.01)        # INTERCEPT
+  tauR[s] ~ dgamma(0.01,0.01)     # INVERSE OF OBSERVATION VARIANCE
+  R[s]    <- 1/tauR[s]            # OBSERVATION VARIANCE, I.E. VARIANCE-COVARIANCE MATRIX SINCE Y ~ MVN(X,R)
+}
+for (t in 2:T) {
+  tauQ[t] ~ dgamma(0.01, 0.01)    # INVERSE OF PROCESS VARIANCE
+  Q[t]    = 1/tauQ[t]             # PROCESS VARIANCE, TIME VARYING
+}
+
+# INITIAL STATE VECTOR T = 1 ---------------------------------------------------
+for (s in 1:S) {
+  X[s,1] ~ dnorm(X0[s], 10)
+}
+
+# AUTOREGRESSIVE PROCESS T + 1 : T ---------------------------------------------
+for (t in 2:T) {
+  for (s in 1:S) {
+    Xhat[s,t] <- phi0[s] + phi[s]*(X[s,t-1] - phi0[s]) + gammaSal*Sal[t,s] +        
+    gammaTemp*Temp[t,s] + gammaMaxTemp*maxTemp[t,s] + gammaDaysAb33*daysAb33[t,s] +
+    gammaConsHWds*consHWds[t,s]
+    X[s,t] ~ dnorm(Xhat[s,t], tauQ[t])
+  }
+}
+
+# OBSERVATION COMPONENT LIKELIHOOD ---------------------------------------------
+for (t in 1:T) {
+  for (s in 1:S) {
+    Y[s,t] ~ dmnorm(X[s,t], tauR[s])
+  }
+}
+}

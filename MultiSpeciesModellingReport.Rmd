@@ -1,0 +1,707 @@
+---
+title: "Multispecies Recruitment Modelling Report"
+author: "Matheus de Barros"
+date: "2024-04-30"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This is a preliminary report on results of spatially-explicit recruitment modelling for 14 species at various sites in the Mobile Bay. First, I explain the modelling framework used, then outline some main results.
+
+## The modelling framework - Multivariate Autoregressive State-Space (MARSS) models
+
+MARSS models are popular frameworks for modelling temporally autocorrelated data (aka time series) and any type of linear stochastic dynamical systems (i.e. systems that evolve linearly with some kind of unobserved stochastic noise around the mean trend). This class of statistical models might be called by different names in the literature such as Dynamic Linear Models (DLMs), or Vector Autoregressive Models (VAR).
+
+The State-Space component of the model means that it estimates and separates two different types of error, an observation and a process error. This separation of observation and process error allows the model to estimate an (unobserved) state, which is assumed to reflect the true underlying dynamics of the system under study (in this example, the recruitment variability). The full MARSS model with time-varying, stochastic gaussian noise used to analyze the data in this report is specified as follows:
+
+$$ X_{[t]} = \phi_{0[s]} + \phi_{[s]}(X_{[t-1]}-\phi_{0[s]}) + \gamma_{[k]}C_{[t]} + \epsilon_{[t]} $$
+
+$$ \epsilon_{[t]} \sim MVN(0, Q_{[t]}) $$
+
+$$ \gamma_{[k]} \sim N(0,10)$$ $$ \phi_{0[s]} \sim N(0,5) $$ $$ \phi_{[s]} \sim N(0,5) $$
+
+$$ Y_{[t]} = X_{[t]} + \omega_{[t]} $$
+
+$$ \omega_{[t]} \sim MVN(0, R_{[t]}) $$
+
+where $X_{[t]}$ denotes the unobserved state process, $\phi_{0[s]}$ and $\phi_{[s]}$ are the intercept and autoregressive terms for each s-th station, respectively, $\gamma_{[k]}$ is the effect for each k-th covariate (denoted $C_{[t]}$), and $\epsilon_{[t]}$ is the random, time-varying process noise (stochastic term). $\epsilon_{[t]}$ follows a multivariate normal distribution, which allows the trends between stations to be temporally correlated according to the variance-covariance matrix $Q_{[t]}$. Further, $Y_{[t]}$ denotes the observed CPUE values, which are also assumed to vary stochastically according to the noise term $\omega_{[t]}$.
+
+In a Bayesian framework, the form of the posterior is as follows:
+
+$$ p()  $$
+
+The model is built using JAGS (which stands for "Just Another Gibbs Sampler"). As the name implies, it uses Gibbs Sampling to run a Monte Carlo Markov Chain (MCMC) algorithm to obtain parameter posterior distributions. The model specification in JAGS language is as follows:
+
+```{r}
+# make sure you have those packages installed
+require(R2jags)
+require(rjags)
+
+modelString <- cat("
+model {
+
+# MULTIVARIATE AUTOREGRESSIVE STATE-SPACE MODEL FOR MODELLING RECRUITMENT TIME SERIES
+# AUTHOR: MATHEUS DE BARROS
+# DATE: 29/04/2024 (dd/mm/yyyy)
+
+# S = NUMBER OF STATIONS
+# T = LENGTH OF TIME SERIES
+# K = NUMBER OF COVARIATES
+
+# PRIOR DISTRIBUTIONS ----------------------------------------------------------
+gammaTemp     ~ dnorm(0, 0.01)    # EFFECT OF TEMPERATURE
+gammaSal      ~ dnorm(0, 0.01)    # EFFECT OF SALINITY
+gammaMaxTemp  ~ dnorm(0, 0.01)    # EFFECT OF MAXIMUM TEMPERATURE
+gammaDaysAb33 ~ dnorm(0, 0.01)    # EFFECT OF DAYS ABOVE 33.6 CELSIUS
+gammaConsHWds ~ dnorm(0, 0.01)    # EFFECT OF CONSECUTIVE HEATWAVE DAYS
+for (s in 1:S) {
+  phi[s]  ~ dnorm(0, 0.01)        # AUTOREGRESSIVE COEFFICIENT
+  phi0[s] ~ dnorm(0, 0.01)        # INTERCEPT
+  tauR[s] ~ dgamma(0.01,0.01)     # INVERSE OF OBSERVATION VARIANCE
+  R[s]    <- 1/tauR[s]            # OBSERVATION VARIANCE, I.E. VARIANCE-COVARIANCE MATRIX SINCE Y ~ MVN(X,R)
+}
+for (t in 2:T) {
+  tauQ[t] ~ dgamma(0.01, 0.01)    # INVERSE OF PROCESS VARIANCE
+  Q[t]    = 1/tauQ[t]             # PROCESS VARIANCE, TIME VARYING
+}
+
+# INITIAL STATE VECTOR T = 1 ---------------------------------------------------
+for (s in 1:S) {
+  X[s,1] ~ dnorm(X0[s], 10)
+}
+
+# AUTOREGRESSIVE PROCESS T + 1 : T ---------------------------------------------
+for (t in 2:T) {
+  for (s in 1:S) {
+    Xhat[s,t] <- phi0[s] + phi[s]*(X[s,t-1] - phi0[s]) + gammaSal*Sal[t,s] +        
+    gammaTemp*Temp[t,s] + gammaMaxTemp*maxTemp[t,s] + gammaDaysAb33*daysAb33[t,s] +
+    gammaConsHWds*consHWds[t,s]
+    X[s,t] ~ dnorm(Xhat[s,t], tauQ[t])
+  }
+}
+
+# OBSERVATION COMPONENT LIKELIHOOD ---------------------------------------------
+for (t in 1:T) {
+  for (s in 1:S) {
+    Y[s,t] ~ dmnorm(X[s,t], tauR[s])
+  }
+}
+
+}",
+file = "MARSS.txt")
+```
+
+## Fitting the model to data
+
+In this section, I will demonstrate how to prepare the data to be passed to JAGS, how to run the models, and how to extract/summarize parameter posterior distributions.
+
+I have also coded a set of helper, high level functions that streamline the process of obtaining parameter posterior predictive distributions:
+
+```{r}
+
+# FUNCTIONS HERE
+
+
+```
+
+### Preparing data
+
+We first use the '' function to obtain the input data in the format JAGS requires, which is basically a list with every data component, and its dimensions:
+
+```{r}
+
+# specify which stations to be analyzed for each species
+selectedStationsCALSAP = c(3,12,14,24,27,28,61)
+selectedStationsANCMIT = c(9,12,14,20,24,27,28,31,56,61)
+selectedStationsFARAZT = c(3,8,9,12,14,20,24,27,28,31,56,61)
+selectedStationsMICUND = c(3,8,9,12,20,27,28,31,56)
+selectedStationsLAGRHO = c(31,63)
+selectedStationsCYNARE = c(3,8,12,20,24,27,28,31,56)
+selectedStationsLITSET = c(3,8,12,14,24,27,28)
+selectedStationsLEIXAN = c(9,12,24,27,28,31,63)
+selectedStationsCYNNEB = c(12,24,28)
+selectedStationsMENAME = c(3,8,16,17,31,56) # MENTICIRRHUS AMERICANUS
+selectedStationsCYNNOT = c(3,8,17,56) # CYNOSCION NOTHUS
+selectedStationsPARLET = c(27,28) # PARALICHTHYS LETHOSTIGMA
+
+# make input data for each species
+inputCALSAP = makeInputData(rawData = FAMPtrawl2,
+              species = "CALLINECTES SAPIDUS",
+              selectedStations = selectedStationsCALSAP)
+
+inputANCMIT = makeInputData(rawData = FAMPtrawl2,
+              species = "ANCHOA MITCHILLI",
+              selectedStations = selectedStationsANCMIT)
+
+inputFARAZT = makeInputData(rawData = FAMPtrawl2,
+              species = "FARFANTEPENAEUS AZTECUS",
+              selectedStations = selectedStationsFARAZT)
+
+inputMICUND = makeInputData(rawData = FAMPtrawl2,
+              species = "MICROPOGONIAS UNDULATUS",
+              selectedStations = selectedStationsMICUND)
+
+inputLAGRHO = makeInputData(rawData = FAMPtrawl2,
+              species = "LAGODON RHOMBOIDES",
+              selectedStations = selectedStationsLAGRHO)
+
+inputCYNARE = makeInputData(rawData = FAMPtrawl2,
+              species = "CYNOSCION ARENARIUS",
+              selectedStations = selectedStationsCYNARE)
+
+inputLITSET = makeInputData(rawData = FAMPtrawl2,
+              species = "LITOPENAEUS SETIFERUS",
+              selectedStations = selectedStationsLITSET)
+
+inputLEIXAN = makeInputData(rawData = FAMPtrawl2,
+              species = "LEIOSTOMUS XANTHURUS",
+              selectedStations = selectedStationsLEIXAN)
+
+inputCYNNEB = makeInputData(rawData = FAMPtrawl2,
+              species = "CYNOSCION NEBULOSUS",
+              selectedStations = selectedStationsCYNNEB)
+
+inputMENAME = makeInputData(rawData = FAMPtrawl2,
+              species = "MENTICIRRHUS AMERICANUS",
+              selectedStations = selectedStationsMENAME)
+
+inputPARLET = makeInputData(rawData = FAMPtrawl2,
+              species = "PARALICHTHYS LETHOSTIGMA",
+              selectedStations = selectedStationsPARLET)
+
+```
+
+### Running the models
+
+```{r}
+
+params = c("X", "Q", "R", "gammaTemp", "gammaSal", "gammaMaxTemp",
+           "gammaDaysAb33", "gammaConsHWds", "phi0", "phi")
+model = "MARSS.txt"
+
+fitCALSAP = jags(inputCALSAP,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitANCMIT = jags(inputANCMIT,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitFARAZT = jags(inputFARAZT,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitMICUND = jags(inputMICUND,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitLAGRHO = jags(inputLAGRHO,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitCYNARE = jags(inputCYNARE,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitLITSET = jags(inputLITSET,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitLEIXAN = jags(inputLEIXAN,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitCYNNEB = jags(inputCYNNEB,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitMENAME = jags(inputMENAME,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+fitPARLET = jags(inputPARLET,
+                 parameters.to.save = params,
+                 model.file         = model, 
+                 n.chains           = 2,
+                 n.burnin           = 3000,
+                 n.thin             = 1,
+                 n.iter             = 10000)
+
+
+```
+
+### Plotting results
+
+#### 1. Blue crab Callinectes sapidus
+
+```{r}
+
+estEstatesCALSAP = plotAndGetStates(fit        = fitCALSAP,
+                                    nStations  = length(selectedStationsCALSAP),
+                                    stationIDs = selectedStationsCALSAP,
+                                    obData     = inputCALSAP$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 2014,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesCALSAP,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+
+```
+
+#### 2. Bay anchovy Anchoa mitchilli
+
+```{r}
+
+estEstatesANCMIT = plotAndGetStates(fit        = fitANCMIT,
+                                    nStations  = length(selectedStationsANCMIT),
+                                    stationIDs = selectedStationsANCMIT,
+                                    obData     = inputANCMIT$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+36,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesANCMIT,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+
+```
+
+#### 3. Brown shrimp Farfantepenaeus aztecus
+
+```{r}
+
+estEstatesFARAZT = plotAndGetStates(fit        = fitFARAZT,
+                                    nStations  = length(selectedStationsFARAZT),
+                                    stationIDs = selectedStationsFARAZT,
+                                    obData     = inputFARAZT$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+33,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesFARAZT,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+```
+
+#### 4. Croaker Micropogonias undulatus
+
+```{r}
+
+estEstatesMICUND = plotAndGetStates(fit        = fitMICUND,
+                                    nStations  = length(selectedStationsMICUND),
+                                    stationIDs = selectedStationsMICUND,
+                                    obData     = inputMICUND$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+35,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesMICUND,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+```
+
+#### 5. Pinfish Lagodon rhomboides
+
+```{r}
+
+estEstatesLAGRHO = plotAndGetStates(fit        = fitLAGRHO,
+                                    nStations  = length(selectedStationsLAGRHO),
+                                    stationIDs = selectedStationsLAGRHO,
+                                    obData     = inputLAGRHO$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+36,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesLAGRHO,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+```
+
+#### 6. Sand seatrout CYNOSCION ARENARIUS
+
+```{r}
+estEstatesCYNARE = plotAndGetStates(fit        = fitCYNARE,
+                                    nStations  = length(selectedStationsCYNARE),
+                                    stationIDs = selectedStationsCYNARE,
+                                    obData     = inputCYNARE$Y,
+                                    panelRows  = 4,
+                                    panelCols  = 4,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+36,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesCYNARE,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+```
+
+#### 7. White shrimp Litopenaeus setiferus
+
+```{r}
+estEstatesLITSET = plotAndGetStates(fit        = fitLITSET,
+                                    nStations  = length(selectedStationsLITSET),
+                                    stationIDs = selectedStationsLITSET,
+                                    obData     = inputLITSET$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+35,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesLITSET,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+```
+
+#### 8. Spot Leiostomus xanthurus
+
+```{r}
+estEstatesLEIXAN = plotAndGetStates(fit        = fitLEIXAN,
+                                    nStations  = length(selectedStationsLEIXAN),
+                                    stationIDs = selectedStationsLEIXAN,
+                                    obData     = inputLEIXAN$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+36,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesLEIXAN,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+
+```
+
+#### 9. Spotted seatrout Cynoscion nebulosus
+
+```{r}
+estEstatesCYNNEB = plotAndGetStates(fit        = fitCYNNEB,
+                                    nStations  = length(selectedStationsCYNNEB),
+                                    stationIDs = selectedStationsCYNNEB,
+                                    obData     = inputCYNNEB$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+14,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesCYNNEB,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+
+```
+
+#### 10. Southern kingfish Menticirrhus americanus
+
+```{r}
+estEstatesMENAME = plotAndGetStates(fit        = fitMENAME,
+                                    nStations  = length(selectedStationsMENAME),
+                                    stationIDs = selectedStationsMENAME,
+                                    obData     = inputMENAME$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+21,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesMENAME,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+
+```
+
+#### 11. Southern founder Paralichthys lethostigma
+
+```{r}
+estEstatesPARLET = plotAndGetStates(fit        = fitPARLET,
+                                    nStations  = length(selectedStationsPARLET),
+                                    stationIDs = selectedStationsPARLET,
+                                    obData     = inputPARLET$Y,
+                                    panelRows  = 3,
+                                    panelCols  = 3,# not relevant if PLOT=F
+                                    startYr    = 1981,
+                                    endYr      = 1981+16,
+                                    plot       = FALSE)
+
+colors = c("Estimated" = "black", "95% C.I." = "skyblue", "Observed" = "black")
+ggplot(data = estEstatesPARLET,
+       aes(x = as.numeric(years),
+           y = mean)) +
+  geom_point(aes(x = as.numeric(years),
+                 y = observations,
+                 color = "Observed"),
+             pch = 20) +
+  geom_line(aes(color = "Estimated")) +
+  geom_ribbon(aes(ymin = upper,
+                  ymax = lower,
+                  fill = "95% C.I."),
+              alpha = 0.3) +
+  xlab("Time point") +
+  ylab("log CPUE") +
+  facet_wrap(~station) +
+  theme_linedraw() + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme(legend.title = element_blank())
+
+
+```
+
+### Effect of covariates
+
+```{r}
+gammasANCMIT = plotGammas(fit = fitANCMIT, sppName = "Bay anchovy")
+gammasCALSAP = plotGammas(fit = fitCALSAP, sppName = "Blue crab")
+gammasCYNARE = plotGammas(fit = fitCYNARE, sppName = "Sand seatrout")
+gammasCYNNEB = plotGammas(fit = fitCYNNEB, sppName = "Spotted seatrout")
+gammasFARAZT = plotGammas(fit = fitFARAZT, sppName = "Brown shrimp")
+gammasLAGRHO = plotGammas(fit = fitLAGRHO, sppName = "Pinfish")
+gammasLEIXAN = plotGammas(fit = fitLEIXAN, sppName = "Spot")
+gammasLITSET = plotGammas(fit = fitLITSET, sppName = "White shrimp")
+gammasMENAME = plotGammas(fit = fitMENAME, sppName = "Southern kingfish")
+gammasMICUND = plotGammas(fit = fitMICUND, sppName = "Croaker")
+gammasPARLET = plotGammas(fit = fitPARLET, sppName = "Southern flounder")
+
+require(ggpubr)
+
+ggarrange(gammasANCMIT, gammasCALSAP, gammasCYNARE, gammasCYNNEB, gammasFARAZT,
+          gammasLAGRHO, gammasLEIXAN, gammasLITSET, gammasMENAME, gammasMICUND,
+          gammasPARLET)
+
+```
